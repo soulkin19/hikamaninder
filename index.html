@@ -139,7 +139,7 @@
             scene.add(startPlatform);
             colliders.push(startPlatform);
 
-            // プレイヤーアバター（シンプルなキューブに戻しました）
+            // プレイヤーアバター
             const playerGeo = new THREE.BoxGeometry(playerSize.x, playerSize.y, playerSize.z);
             const playerMat = new THREE.MeshLambertMaterial({ color: 0x00bcd4 });
             playerMesh = new THREE.Mesh(playerGeo, playerMat);
@@ -159,6 +159,7 @@
             controls.minDistance = 100;
             controls.maxDistance = 600;
             controls.enablePan = false; 
+            controls.enableKeys = false; // ★ここが原因！矢印キーによるカメラの回転・移動を無効化
 
             window.addEventListener('resize', onWindowResize);
             window.addEventListener('keydown', (e) => handleKeyEvent(e, true));
@@ -172,11 +173,18 @@
         }
 
         function setupTouchControls() {
+            // ★画面のボタンをタッチした時に、裏にあるカメラが反応しないようにイベントを止める（stopPropagation）
             const bindTouch = (id, prop) => {
                 const btn = document.getElementById(id);
-                btn.addEventListener('pointerdown', (e) => { e.preventDefault(); input[prop] = true; });
-                btn.addEventListener('pointerup', (e) => { e.preventDefault(); input[prop] = false; });
-                btn.addEventListener('pointerleave', (e) => { e.preventDefault(); input[prop] = false; });
+                btn.addEventListener('pointerdown', (e) => { 
+                    e.preventDefault(); e.stopPropagation(); input[prop] = true; 
+                });
+                btn.addEventListener('pointerup', (e) => { 
+                    e.preventDefault(); e.stopPropagation(); input[prop] = false; 
+                });
+                btn.addEventListener('pointerleave', (e) => { 
+                    e.preventDefault(); e.stopPropagation(); input[prop] = false; 
+                });
             };
             bindTouch('pad-up', 'forward');
             bindTouch('pad-down', 'backward');
@@ -213,10 +221,10 @@
         }
 
         function updatePhysics() {
-            // --- カメラの向きを基準にした移動ベクトルの計算 ---
+            // カメラの向きを基準にした移動ベクトルの計算
             const camDir = new THREE.Vector3();
             camera.getWorldDirection(camDir);
-            camDir.y = 0; // 水平方向のみにする
+            camDir.y = 0; 
             camDir.normalize();
 
             const camRight = new THREE.Vector3();
@@ -229,7 +237,7 @@
             if (input.left) { moveX -= camRight.x; moveZ -= camRight.z; }
             if (input.right) { moveX += camRight.x; moveZ += camRight.z; }
 
-            // 移動速度の適用（キャラクターを回転させる処理を削除）
+            // 移動速度の適用
             if (moveX !== 0 || moveZ !== 0) {
                 const moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ);
                 playerVelocity.x = (moveX / moveLen) * MOVE_SPEED;
@@ -345,7 +353,7 @@
             requestAnimationFrame(animate);
             updatePhysics();
             
-            // カメラの注視点をプレイヤーに追従させる
+            // カメラの注視点をプレイヤーに追従させる（視点は勝手に回らなくなります）
             controls.target.copy(playerPos);
             controls.update();
             

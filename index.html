@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>hikamaninder - ヒカマー登録</title>
+    <title>hikamaninder - ヒカマー登録＆一覧</title>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f7f6; color: #333; padding: 20px; }
-        .container { max-width: 500px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        h1 { text-align: center; color: #ff5a5f; }
+        .container { max-width: 600px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 30px; }
+        h1 { text-align: center; color: #ff5a5f; margin-bottom: 5px; }
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; }
         input[type="text"], input[type="password"], input[type="url"], input[type="file"] {
@@ -20,6 +20,27 @@
         }
         button:hover { background-color: #e0484d; }
         #message { margin-top: 15px; text-align: center; font-weight: bold; }
+
+        /* ユーザー一覧（タイムライン）のスタイル */
+        .timeline-container { max-width: 600px; margin: 0 auto; }
+        .timeline-title { text-align: center; color: #333; margin-bottom: 20px; }
+        .user-card {
+            background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            margin-bottom: 15px; display: flex; align-items: center; gap: 20px;
+        }
+        .user-avatar {
+            width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 2px solid #ff5a5f; background: #eee;
+        }
+        .user-info { flex-grow: 1; }
+        .user-name { font-size: 1.2em; font-weight: bold; margin: 0 0 10px 0; color: #111; }
+        .sns-links { display: flex; gap: 10px; flex-wrap: wrap; }
+        .sns-btn {
+            display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 0.85em;
+            text-decoration: none; font-weight: bold; color: white; transition: background 0.2s;
+        }
+        .btn-x { background-color: #111; }         .btn-x:hover { background-color: #333; }
+        .btn-yt { background-color: #ff0000; }     .btn-yt:hover { background-color: #cc0000; }
+        .btn-insta { background-color: #e1306c; }  .btn-insta:hover { background-color: #b82354; }
     </style>
 </head>
 <body>
@@ -64,11 +85,18 @@
     </form>
 </div>
 
+<div class="timeline-container">
+    <h2 class="timeline-title">登録済みのヒカマーたち</h2>
+    <div id="userList">
+        <p style="text-align: center; color: #888;">読み込み中ブンブン...</p>
+    </div>
+</div>
+
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-    import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+    // データをリアルタイム監視して取得するために onSnapshot, query, orderBy を追加
+    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-    // ご提供いただいた構成情報
     const firebaseConfig = {
       apiKey: "AIzaSyCwhHspaG94goiCIjVj3h-Un5pBK3JTjMU",
       authDomain: "soulkin-aa3b7.firebaseapp.com",
@@ -80,30 +108,19 @@
       measurementId: "G-S5Z8TTWYE2"
     };
 
-    // Firebaseの初期化
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    /**
-     * XSS対策：入力されたHTMLタグを無効化（エスケープ）する関数
-     */
+    // XSS対策：HTMLエスケープ関数
     function escapeHTML(str) {
         if (!str) return "";
         return str.replace(/[&<>'"]/g, function(match) {
-            const escapeMap = {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                "'": '&#39;',
-                '"': '&quot;'
-            };
+            const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' };
             return escapeMap[match];
         });
     }
 
-    /**
-     * 画像をBase64形式の文字列に変換する関数
-     */
+    // 画像をBase64に変換
     function fileToBase64(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -113,21 +130,71 @@
         });
     }
 
-    /**
-     * パスワードをSHA-256でハッシュ化（暗号化）する関数
-     */
+    // パスワードのハッシュ化
     async function hashPassword(password) {
         const msgUint8 = new TextEncoder().encode(password);
         const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        return hashHex;
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    // フォーム送信時の処理
+    // 【新機能】Firestoreからユーザー一覧をリアルタイムで取得して表示する処理
+    // 登録された時間が新しい順（createdAtの降順）に並べ替えます
+    const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
+    
+    onSnapshot(q, (querySnapshot) => {
+        const userListDiv = document.getElementById('userList');
+        userListDiv.innerHTML = ""; // 一旦表示をクリア
+
+        if (querySnapshot.empty) {
+            userListDiv.innerHTML = `<p style="text-align: center; color: #888;">まだ登録者がいません。最初のヒカマーになろう！</p>`;
+            return;
+        }
+
+        querySnapshot.forEach((doc) => {
+            const userData = doc.data();
+            
+            // 安全のために、表示前にも再度サニタイズ（念のため）
+            const name = escapeHTML(userData.username);
+            const img = userData.profileImageBase64; // Base64データなのでそのままsrcに使える
+            const xUrl = escapeHTML(userData.socialLinks?.x);
+            const ytUrl = escapeHTML(userData.socialLinks?.youtube);
+            const instaUrl = escapeHTML(userData.socialLinks?.instagram);
+
+            // ユーザーカードのHTMLを組み立て
+            let cardHtml = `
+                <div class="user-card">
+                    <img src="${img}" alt="${name}の画像" class="user-avatar" onerror="this.src='https://placehold.co/80'">
+                    <div class="user-info">
+                        <p class="user-name">${name}</p>
+                        <div class="sns-links">
+                            <a href="${xUrl}" target="_blank" rel="noopener noreferrer" class="sns-btn btn-x">X (Twitter)</a>
+            `;
+
+            // YouTubeとインスタは任意項目なので、データがある場合のみリンクボタンを表示する
+            if (ytUrl) {
+                cardHtml += `<a href="${ytUrl}" target="_blank" rel="noopener noreferrer" class="sns-btn btn-yt">YouTube</a>`;
+            }
+            if (instaUrl) {
+                cardHtml += `<a href="${instaUrl}" target="_blank" rel="noopener noreferrer" class="sns-btn btn-insta">Instagram</a>`;
+            }
+
+            cardHtml += `
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            userListDiv.insertAdjacentHTML('beforeend', cardHtml);
+        });
+    }, (error) => {
+        console.error("データ取得エラー:", error);
+        document.getElementById('userList').innerHTML = `<p style="text-align: center; color: red;">データの取得に失敗しました。</p>`;
+    });
+
+    // フォーム送信（ユーザー登録）の処理
     document.getElementById('registerForm').addEventListener('submit', async function(e) {
-        e.preventDefault(); // デフォルトの送信処理をキャンセル
-        
+        e.preventDefault();
         const submitBtn = document.getElementById('submitBtn');
         const messageDiv = document.getElementById('message');
         
@@ -136,7 +203,6 @@
         messageDiv.textContent = "登録中ブンブンハロー...";
 
         try {
-            // 1. 入力値の取得とサニタイズ（XSS対策）
             const rawUsername = document.getElementById('username').value;
             const rawXLink = document.getElementById('xLink').value;
             const rawYtLink = document.getElementById('ytLink').value;
@@ -144,44 +210,31 @@
             const rawPassword = document.getElementById('password').value;
             const imageFile = document.getElementById('profileImage').files[0];
 
+            if (imageFile && imageFile.size > 1024 * 1024) {
+                throw new Error("画像サイズは1MB以下にしてください。");
+            }
+
             const username = escapeHTML(rawUsername);
             const xLink = escapeHTML(rawXLink);
             const ytLink = escapeHTML(rawYtLink);
             const instaLink = escapeHTML(rawInstaLink);
-
-            // 2. パスワードのハッシュ化
             const hashedPassword = await hashPassword(rawPassword);
+            const base64Image = await fileToBase64(imageFile);
 
-            // 3. 画像のBase64変換
-            let base64Image = "";
-            if (imageFile) {
-                // ファイルサイズチェック (例: 1MB以下に制限。Firestoreの制限対策)
-                if (imageFile.size > 1024 * 1024) {
-                    throw new Error("画像サイズは1MB以下にしてください。");
-                }
-                base64Image = await fileToBase64(imageFile);
-            }
-
-            // 4. Firestoreへデータを保存
-            // "users" というコレクションに保存します
-            const docRef = await addDoc(collection(db, "users"), {
+            await addDoc(collection(db, "users"), {
                 username: username,
-                passwordHash: hashedPassword, // ハッシュ化されたパスワード
+                passwordHash: hashedPassword,
                 profileImageBase64: base64Image,
-                socialLinks: {
-                    x: xLink,        // 必須
-                    youtube: ytLink, // 任意
-                    instagram: instaLink // 任意
-                },
+                socialLinks: { x: xLink, youtube: ytLink, instagram: instaLink },
                 createdAt: new Date().toISOString()
             });
 
             messageDiv.style.color = "green";
-            messageDiv.textContent = "登録完了！ようこそ、hikamaninderへ！";
+            messageDiv.textContent = "登録完了！";
             document.getElementById('registerForm').reset();
 
         } catch (error) {
-            console.error("Error adding document: ", error);
+            console.error("エラー: ", error);
             messageDiv.style.color = "red";
             messageDiv.textContent = "エラーが発生しました: " + error.message;
         } finally {

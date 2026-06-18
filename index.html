@@ -3,9 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>hikamaninder - ヒカマー登録＆一覧</title>
+    <title>hikamaninder</title>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #f4f7f6; color: #333; padding: 20px; }
+        
+        /* ナビゲーションボタンのスタイル */
+        .nav-buttons { text-align: center; margin-bottom: 20px; }
+        .nav-btn {
+            padding: 10px 20px; margin: 0 5px; font-size: 16px; border: none; border-radius: 20px;
+            cursor: pointer; background-color: #ddd; color: #555; transition: 0.3s; font-weight: bold;
+        }
+        .nav-btn.active { background-color: #ff5a5f; color: white; }
+        .nav-btn:hover:not(.active) { background-color: #ccc; }
+
         .container { max-width: 600px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 30px; }
         h1 { text-align: center; color: #ff5a5f; margin-bottom: 5px; }
         .form-group { margin-bottom: 15px; }
@@ -14,16 +24,24 @@
             width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box;
         }
         .required { color: red; font-size: 0.8em; margin-left: 5px; }
-        button {
+        .submit-btn {
             width: 100%; padding: 12px; background-color: #ff5a5f; color: white; border: none;
-            border-radius: 5px; font-size: 16px; cursor: pointer; margin-top: 10px;
+            border-radius: 5px; font-size: 16px; cursor: pointer; margin-top: 10px; font-weight: bold;
         }
-        button:hover { background-color: #e0484d; }
+        .submit-btn:hover { background-color: #e0484d; }
         #message { margin-top: 15px; text-align: center; font-weight: bold; }
 
         /* ユーザー一覧（タイムライン）のスタイル */
         .timeline-container { max-width: 600px; margin: 0 auto; }
         .timeline-title { text-align: center; color: #333; margin-bottom: 20px; }
+        
+        /* 検索ボックスのスタイル */
+        .search-box {
+            width: 100%; padding: 12px; margin-bottom: 20px; border: 2px solid #ff5a5f;
+            border-radius: 25px; box-sizing: border-box; font-size: 16px; outline: none;
+        }
+        .search-box:focus { box-shadow: 0 0 8px rgba(255, 90, 95, 0.4); }
+
         .user-card {
             background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
             margin-bottom: 15px; display: flex; align-items: center; gap: 20px;
@@ -45,7 +63,12 @@
 </head>
 <body>
 
-<div class="container">
+<div class="nav-buttons">
+    <button id="showRegisterBtn" class="nav-btn active">登録する</button>
+    <button id="showListBtn" class="nav-btn">ヒカマーを探す</button>
+</div>
+
+<div id="registerSection" class="container">
     <h1>hikamaninder</h1>
     <p style="text-align: center;">ヒカマーの輪を広げよう！</p>
     
@@ -80,13 +103,16 @@
             <input type="url" id="instaLink" placeholder="https://instagram.com/your_id">
         </div>
 
-        <button type="submit" id="submitBtn">登録する</button>
+        <button type="submit" id="submitBtn" class="submit-btn">登録する</button>
         <div id="message"></div>
     </form>
 </div>
 
-<div class="timeline-container">
-    <h2 class="timeline-title">登録済みのヒカマーたち</h2>
+<div id="listSection" class="timeline-container" style="display: none;">
+    <h2 class="timeline-title">ヒカマー一覧</h2>
+    
+    <input type="text" id="searchInput" class="search-box" placeholder="ユーザー名で検索...">
+    
     <div id="userList">
         <p style="text-align: center; color: #888;">読み込み中ブンブン...</p>
     </div>
@@ -94,7 +120,6 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-    // データをリアルタイム監視して取得するために onSnapshot, query, orderBy を追加
     import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
     const firebaseConfig = {
@@ -111,7 +136,43 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // XSS対策：HTMLエスケープ関数
+    // 【新機能】画面の表示切り替えロジック
+    const btnRegister = document.getElementById('showRegisterBtn');
+    const btnList = document.getElementById('showListBtn');
+    const secRegister = document.getElementById('registerSection');
+    const secList = document.getElementById('listSection');
+
+    btnRegister.addEventListener('click', () => {
+        secRegister.style.display = 'block';
+        secList.style.display = 'none';
+        btnRegister.classList.add('active');
+        btnList.classList.remove('active');
+    });
+
+    btnList.addEventListener('click', () => {
+        secRegister.style.display = 'none';
+        secList.style.display = 'block';
+        btnList.classList.add('active');
+        btnRegister.classList.remove('active');
+    });
+
+    // 【新機能】ユーザー名での検索ロジック
+    document.getElementById('searchInput').addEventListener('input', function(e) {
+        const searchText = e.target.value.toLowerCase(); // 大文字小文字を区別しないように小文字化
+        const cards = document.querySelectorAll('.user-card'); // 画面上の全てのユーザーカードを取得
+        
+        cards.forEach(card => {
+            const userName = card.querySelector('.user-name').textContent.toLowerCase();
+            // 検索文字が含まれていれば表示、なければ非表示
+            if (userName.includes(searchText)) {
+                card.style.display = 'flex';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    });
+
+    // 共通関数群
     function escapeHTML(str) {
         if (!str) return "";
         return str.replace(/[&<>'"]/g, function(match) {
@@ -120,7 +181,6 @@
         });
     }
 
-    // 画像をBase64に変換
     function fileToBase64(file) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -130,7 +190,6 @@
         });
     }
 
-    // パスワードのハッシュ化
     async function hashPassword(password) {
         const msgUint8 = new TextEncoder().encode(password);
         const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
@@ -138,13 +197,12 @@
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
-    // 【新機能】Firestoreからユーザー一覧をリアルタイムで取得して表示する処理
-    // 登録された時間が新しい順（createdAtの降順）に並べ替えます
+    // Firestoreからユーザー一覧を取得（既存のまま）
     const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
     
     onSnapshot(q, (querySnapshot) => {
         const userListDiv = document.getElementById('userList');
-        userListDiv.innerHTML = ""; // 一旦表示をクリア
+        userListDiv.innerHTML = "";
 
         if (querySnapshot.empty) {
             userListDiv.innerHTML = `<p style="text-align: center; color: #888;">まだ登録者がいません。最初のヒカマーになろう！</p>`;
@@ -153,15 +211,12 @@
 
         querySnapshot.forEach((doc) => {
             const userData = doc.data();
-            
-            // 安全のために、表示前にも再度サニタイズ（念のため）
             const name = escapeHTML(userData.username);
-            const img = userData.profileImageBase64; // Base64データなのでそのままsrcに使える
+            const img = userData.profileImageBase64;
             const xUrl = escapeHTML(userData.socialLinks?.x);
             const ytUrl = escapeHTML(userData.socialLinks?.youtube);
             const instaUrl = escapeHTML(userData.socialLinks?.instagram);
 
-            // ユーザーカードのHTMLを組み立て
             let cardHtml = `
                 <div class="user-card">
                     <img src="${img}" alt="${name}の画像" class="user-avatar" onerror="this.src='https://placehold.co/80'">
@@ -171,13 +226,8 @@
                             <a href="${xUrl}" target="_blank" rel="noopener noreferrer" class="sns-btn btn-x">X (Twitter)</a>
             `;
 
-            // YouTubeとインスタは任意項目なので、データがある場合のみリンクボタンを表示する
-            if (ytUrl) {
-                cardHtml += `<a href="${ytUrl}" target="_blank" rel="noopener noreferrer" class="sns-btn btn-yt">YouTube</a>`;
-            }
-            if (instaUrl) {
-                cardHtml += `<a href="${instaUrl}" target="_blank" rel="noopener noreferrer" class="sns-btn btn-insta">Instagram</a>`;
-            }
+            if (ytUrl) cardHtml += `<a href="${ytUrl}" target="_blank" rel="noopener noreferrer" class="sns-btn btn-yt">YouTube</a>`;
+            if (instaUrl) cardHtml += `<a href="${instaUrl}" target="_blank" rel="noopener noreferrer" class="sns-btn btn-insta">Instagram</a>`;
 
             cardHtml += `
                         </div>
@@ -187,12 +237,18 @@
 
             userListDiv.insertAdjacentHTML('beforeend', cardHtml);
         });
+
+        // データが更新された時に検索窓に文字が入っていれば、再度フィルターをかける
+        const currentSearchText = document.getElementById('searchInput').value;
+        if(currentSearchText) {
+            document.getElementById('searchInput').dispatchEvent(new Event('input'));
+        }
     }, (error) => {
         console.error("データ取得エラー:", error);
         document.getElementById('userList').innerHTML = `<p style="text-align: center; color: red;">データの取得に失敗しました。</p>`;
     });
 
-    // フォーム送信（ユーザー登録）の処理
+    // フォーム送信処理（既存のまま）
     document.getElementById('registerForm').addEventListener('submit', async function(e) {
         e.preventDefault();
         const submitBtn = document.getElementById('submitBtn');
@@ -232,6 +288,9 @@
             messageDiv.style.color = "green";
             messageDiv.textContent = "登録完了！";
             document.getElementById('registerForm').reset();
+            
+            // 登録成功後、自動的に一覧タブへ移動させるオプション
+            document.getElementById('showListBtn').click();
 
         } catch (error) {
             console.error("エラー: ", error);
